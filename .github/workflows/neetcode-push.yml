@@ -1,0 +1,49 @@
+name: Notify Code Duel on Push
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Get changed files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only HEAD~1 HEAD | tr '\n' ',')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+
+      - name: Parse solved problem
+        id: parse
+        run: |
+          FILES="${{ steps.changed.outputs.files }}"
+          # Expects files like: arrays/two-sum.py or dynamic-programming/coin-change.js
+          PROBLEM=$(echo "$FILES" | tr ',' '\n' | grep -E '\.(py|js|ts|java|cpp|go)$' | head -1)
+          CATEGORY=$(echo "$PROBLEM" | cut -d'/' -f1)
+          FILENAME=$(basename "$PROBLEM" | sed 's/\.[^.]*$//' | tr '-' ' ')
+          LANG=$(echo "$PROBLEM" | grep -oE '\.(py|js|ts|java|cpp|go)$' | tr -d '.')
+          echo "problem=$FILENAME" >> $GITHUB_OUTPUT
+          echo "category=$CATEGORY" >> $GITHUB_OUTPUT
+          echo "lang=$LANG" >> $GITHUB_OUTPUT
+          echo "file=$PROBLEM" >> $GITHUB_OUTPUT
+
+      - name: Send to Code Duel backend
+        run: |
+          curl -X POST "${{ secrets.CODE_DUEL_WEBHOOK_URL }}/api/solve" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.CODE_DUEL_SECRET }}" \
+            -d '{
+              "user": "${{ github.actor }}",
+              "problem": "${{ steps.parse.outputs.problem }}",
+              "category": "${{ steps.parse.outputs.category }}",
+              "lang": "${{ steps.parse.outputs.lang }}",
+              "file": "${{ steps.parse.outputs.file }}",
+              "repo": "${{ github.repository }}",
+              "commit": "${{ github.sha }}",
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }'
